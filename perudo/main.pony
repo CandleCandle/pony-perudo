@@ -24,11 +24,17 @@ trait Player
 	be do_bid(game: Game, history: Array[Bid] val)
 
 primitive FaceOne
+	fun apply(): U8 => 0
 primitive FaceTwo
+	fun apply(): U8 => 1
 primitive FaceThree
+	fun apply(): U8 => 2
 primitive FaceFour
+	fun apply(): U8 => 3
 primitive FaceFive
+	fun apply(): U8 => 4
 primitive FaceSix
+	fun apply(): U8 => 5
 type Face is ( FaceOne | FaceTwo | FaceThree | FaceFour | FaceFive | FaceSix )
 
 primitive Faces
@@ -71,6 +77,18 @@ class val Bid
 		count = count'
 		face = face'
 
+	fun eq(that: Bid): Bool =>
+		compare(that) == Equal
+
+	fun box compare(that: Bid): Compare =>
+		// if this is less than that, return 'Less'
+		let fake_count = if face is FaceOne then count * 2 else count end
+		let that_fake_count = if that.face is FaceOne then that.count * 2 else that.count end
+		if (face is that.face) and fake_count.eq(that_fake_count) then return Equal end
+		let c: Compare = fake_count.compare(that_fake_count)
+		if c != Equal then return c end
+		face().compare(that.face())
+
 class _Player
 	var pot: Pot
 	let player: Player
@@ -102,16 +120,17 @@ actor Game
 		match _state
 		| let state: Turn =>
 			try
+				// next player when (new bid > latest bid) OR this is the first bid
 				let index = state.next_player
-				// TODO assert that the correct player is playing
-				// TODO assert that the given bid is higher than the existing
-				_bid_history.push(bid)
 				let next_index = (index + 1) % _players.size()
+				if (_bid_history.size() == 0) then
+					_bid_history.push(bid)
+					for b in _bid_history.values() do
+						_bid_history.push(b)
+					end
+				end
 				_state = Turn(next_index)
 				let history_copy: Array[Bid] iso = recover iso Array[Bid](10) end
-				for b in _bid_history.values() do
-					_bid_history.push(b)
-				end
 				_players(next_index)?.player.do_bid(this, consume history_copy)
 			end
 		end
