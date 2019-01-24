@@ -70,14 +70,10 @@ actor NetcatPlayer is Player
 				return
 			end
 			let split: ISize = bid.find(" ")?
-			@printf[None]("split: %d\n".cstring(), split)
 			let count': String = bid.substring(0, split)
 			let face': String = bid.substring(split+1).>rstrip()
-			@printf[None]("count': --%s--, face': --%s--\n".cstring(), count'.cstring(), face'.cstring())
 			let count: U8 = count'.u8()?
-			@printf[None]("count: %d\n".cstring(), count)
 			let face: Face = Faces(face'.u8()? - 1)
-			@printf[None]("count: %d, face: %s\n".cstring(), count, face.string().cstring())
 			let actual = Bid(count, face)
 			_game.do_bid(this, actual)
 			_state = _NcStateWaiting
@@ -92,7 +88,7 @@ actor NetcatPlayer is Player
 		end
 
 	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) =>
-		_conn.write("*** round start: starting "+start_index.string()+", me "+your_index.string()+".\n")
+		_conn.write("*** round start: starting "+start_index.string()+", me "+your_index.string()+" mode: "+round.string()+".\n")
 		for (i, n) in current_players.pairs() do
 			_conn.write("***     round start: "+i.string()+" -> "+n+".\n")
 		end
