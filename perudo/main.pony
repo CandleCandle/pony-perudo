@@ -21,7 +21,7 @@ class val Turn
 type GameState is ( Start | Turn | RoundEnd | End )
 
 trait Player
-	be do_bid(game: Game, history: Array[Bid] val)
+	be do_bid(game: Game, pot: Pot val, history: Array[Bid] val)
 
 primitive FaceOne
 	fun apply(): U8 => 0
@@ -58,16 +58,20 @@ primitive Randoms
 		(let a: I64, let b: I64) = Time.now()
 		Rand.create(a.u64(), b.u64())
 
-class Pot
-	let dice: Array[Face]
+class val Pot
+	let dice: Array[Face] val
 
-	new create(count: U8, rand: Random) =>
-		dice = Array[Face](count.usize())
-		var c: U8 = 0
-		while c < count do
-			dice.push(Faces.roll(rand))
-			c = c + 1
-		end
+//	new create(count: U8, rand: Random) =>
+//		let dice' = recover iso Array[Face](count.usize()) end
+//		var c: U8 = 0
+//		while c < count do
+//			dice'.push(Faces.roll(rand))
+//			c = c + 1
+//		end
+//		dice = recover val consume dice' end
+
+	new val create(dice': Array[Face] val) =>
+		dice = dice'
 
 class val Bid
 	let face: Face
@@ -80,6 +84,9 @@ class val Bid
 	fun eq(that: Bid): Bool =>
 		compare(that) == Equal
 
+	fun gt(that: Bid): Bool =>
+		compare(that) == Greater
+
 	fun box compare(that: Bid): Compare =>
 		// if this is less than that, return 'Less'
 		let fake_count = if face is FaceOne then count * 2 else count end
@@ -90,12 +97,12 @@ class val Bid
 		face().compare(that.face())
 
 class _Player
-	var pot: Pot
+	let pot: Pot val
 	let player: Player
 
-	new initial(player': Player, rand: Random) =>
+	new initial(player': Player, pot': Pot) =>
 		player = player'
-		pot = Pot(5, rand)
+		pot = pot'
 
 actor Game
 	var _state: GameState = Start
@@ -111,27 +118,44 @@ actor Game
 		var rand: Random = Randoms()
 		rand.u128() // discard the first result as it is predictable.
 		// TODO rebuild _players; fun called from do_call
-		for p in _starting_players.values() do
-			_players.push(_Player.initial(p, rand))
-		end
 		_rand = rand
+		for p in _starting_players.values() do
+			_players.push(_Player.initial(p, _create_pot(5, rand)))
+		end
+
+	fun tag _create_pot(count: U8, rand: Random): Pot val =>
+		let a: Array[Face] iso = recover iso Array[Face](count.usize()) end
+		var i: U8 = 0
+		while i < count do
+			a.push(Faces.roll(rand))
+			i = i + 1
+		end
+		Pot.create(recover val consume a end)
 
 	be do_bid(from: Player tag, bid: Bid) =>
 		match _state
 		| let state: Turn =>
 			try
+				let last_bid = if _bid_history.size() == 0 then
+						Bid(0, FaceOne) // this is the first bid of the round, set last_bid to min_bid
+					else
+						_bid_history(_bid_history.size()-1)?
+					end
 				// next player when (new bid > latest bid) OR this is the first bid
 				let index = state.next_player
-				let next_index = (index + 1) % _players.size()
-				if (_bid_history.size() == 0) then
-					_bid_history.push(bid)
-					for b in _bid_history.values() do
-						_bid_history.push(b)
+				let next_index = if (bid > last_bid) then
+						_bid_history.push(bid)
+						(index + 1) % _players.size()
+					else
+						index
 					end
-				end
 				_state = Turn(next_index)
 				let history_copy: Array[Bid] iso = recover iso Array[Bid](10) end
-				_players(next_index)?.player.do_bid(this, consume history_copy)
+				for b in _bid_history.values() do
+					history_copy.push(b)
+				end
+				let next_player = _players(next_index)?
+				next_player.player.do_bid(this, next_player.pot, consume history_copy)
 			end
 		end
 
