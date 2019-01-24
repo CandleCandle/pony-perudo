@@ -1,11 +1,10 @@
 use "time"
 use "random"
 
-primitive Start
-primitive RoundEnd
-primitive RoundStart
-primitive End
-class val PalaficoTurn
+primitive _GameStart
+primitive _GameEnd
+
+class val _GamePalaficoTurn
 	let _next_player: USize
 
 	new val create(next_player': USize) =>
@@ -13,7 +12,7 @@ class val PalaficoTurn
 
 	fun next_player(): USize => _next_player
 
-class val NormalTurn
+class val _GameNormalTurn
 	let _next_player: USize
 
 	new val create(next_player': USize) =>
@@ -21,9 +20,9 @@ class val NormalTurn
 
 	fun next_player(): USize => _next_player
 
-type Turn is ( NormalTurn | PalaficoTurn )
+type _GameTurn is ( _GameNormalTurn | _GamePalaficoTurn )
 
-type GameState is ( Start | Turn | RoundStart | RoundEnd | End )
+type _GameState is ( _GameStart | _GameTurn | _GameEnd )
 
 primitive Randoms
 	fun apply(): Random ref =>
@@ -42,7 +41,7 @@ class _Player
 		name = name'
 
 actor Game
-	var _state: GameState = Start
+	var _state: _GameState = _GameStart
 	let _starting_players: Array[_Player]
 	var _players: Array[_Player]
 	var _bid_history: Array[Bid] = Array[Bid](10)
@@ -58,7 +57,7 @@ actor Game
 
 	be add_player(name: String val, player: Player tag) =>
 		match _state
-		| Start =>
+		| _GameStart =>
 			_add_player(name, player)
 		end
 
@@ -68,10 +67,10 @@ actor Game
 
 	be start() =>
 		match _state
-		| Start =>
+		| _GameStart =>
 			if _starting_players.size() == 0 then return end
 			_dispatch_game_start()
-			_state = NormalTurn(0)
+			_state = _GameNormalTurn(0)
 			_dispatch_round_start(0, RoundNormal)
 			try
 				let next_player = _players(0)?
@@ -83,20 +82,20 @@ actor Game
 	be do_bid(from: Player tag, bid: Bid) =>
 		@printf[None]("bid received: %s\n".cstring(), bid.string().cstring())
 		match _state
-		| let state: Turn =>
+		| let state: _GameTurn =>
 			try
 				let last_bid = _last_bid_safe()
 				// next player when (new bid > latest bid) OR this is the first bid
 				let index = state.next_player()
 				let next_index = match state
-				| let state': NormalTurn =>
+				| let state': _GameNormalTurn =>
 					if (bid > last_bid) then
 						_bid_history.push(bid)
 						(index + 1) % _players.size()
 					else
 						index
 					end
-				| let state': PalaficoTurn =>
+				| let state': _GamePalaficoTurn =>
 					if _bid_history.size() == 0 then
 						_bid_history.push(bid)
 						(index + 1) % _players.size()
@@ -111,8 +110,8 @@ actor Game
 				end
 
 				_state = match state
-					| let state': NormalTurn => NormalTurn(next_index)
-					| let state': PalaficoTurn => PalaficoTurn(next_index)
+					| let state': _GameNormalTurn => _GameNormalTurn(next_index)
+					| let state': _GamePalaficoTurn => _GamePalaficoTurn(next_index)
 					end
 				let next_player = _players(next_index)?
 				@printf[None]("requesting bid from: %d\n".cstring(), next_index)
@@ -182,7 +181,7 @@ actor Game
 
 	be do_call(from: Player tag) =>
 		match _state
-		| let state: Turn =>
+		| let state: _GameTurn =>
 			@printf[None]("call from %d; history was:\n".cstring(), state.next_player())
 			for b in _bid_history.values() do
 				@printf[None]("\t%s\n".cstring(), b.string().cstring())
@@ -193,7 +192,7 @@ actor Game
 				@printf[None]("\tplayer %d has %s\n".cstring(), i, p.pot.string().cstring())
 				count = count + p.pot.count_for_face(last_bid.face)
 				match state
-				| let state': NormalTurn =>
+				| let state': _GameNormalTurn =>
 					if not (last_bid.face is FaceOne) then
 						count = count + p.pot.count_for_face(FaceOne)
 					end
@@ -231,17 +230,17 @@ actor Game
 			_players = players'
 
 			if _players.size() == 1 then
-				_state = End
+				_state = _GameEnd
 				_dispatch_game_end()
 			else
 				_bid_history.clear()
 				try
 					let next_player = _players(next_index)?
 					if next_player.pot.dice.size() == 1 then
-						_state = PalaficoTurn(next_index)
+						_state = _GamePalaficoTurn(next_index)
 						_dispatch_round_start(next_index, RoundPalafico)
 					else
-						_state = NormalTurn(next_index)
+						_state = _GameNormalTurn(next_index)
 						_dispatch_round_start(next_index, RoundNormal)
 					end
 					next_player.player.do_bid(this, next_player.pot, recover val Array[Bid](0) end)
