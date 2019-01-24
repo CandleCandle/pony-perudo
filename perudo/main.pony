@@ -49,6 +49,7 @@ actor BasicCaller is Player
 
 primitive Start
 primitive RoundEnd
+primitive RoundStart
 primitive End
 class val Turn
 	let next_player: USize
@@ -58,14 +59,19 @@ class val Turn
 
 type GameState is ( Start | Turn | RoundEnd | End )
 
+primitive RoundNormal
+primitive RoundPalafico
+type RoundType is ( RoundNormal | RoundPalafico )
+
 trait Player
+	// Actions:
 	be do_bid(game: Game, pot: Pot val, history: Array[Bid] val)
 
 	// Events:
-	// - game start - number of players & names?
-	// - round start - your index, starting index & name?, palifiko status
-	// - round end - losing index & name?, next starting index & name?
-	// - game end - winner index & name?
+	be game_start(all_players: Array[String] val) => None
+	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) => None
+	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize) => None
+	be game_end(all_players: Array[String] val, winning_index: USize, your_index: USize) => None
 
 primitive FaceOne
 	fun apply(): U8 => 0
@@ -104,12 +110,12 @@ primitive Faces
 		apply(rand.int(6).u8())
 
 primitive Randoms
-	fun apply(): Random =>
+	fun apply(): Random ref =>
 		(let a: I64, let b: I64) = Time.now()
 		Rand.create(a.u64(), b.u64())
 
 primitive Pots
-	fun create_pot(count: U8, rand: Random): Pot val =>
+	fun create_pot(count: U8, rand: Random ref): Pot val =>
 		let a: Array[Face] iso = recover iso Array[Face](count.usize()) end
 		var i: U8 = 0
 		while i < count do
@@ -192,14 +198,19 @@ actor Game
 	new create(starting_players': Array[Player tag] iso) =>
 		_starting_players = consume starting_players'
 		_players = Array[_Player](_starting_players.size())
-		(let a: I64, let b: I64) = Time.now()
-		var rand: Random = Randoms()
-		rand.u128() // discard the first result as it is predictable.
-		// TODO rebuild _players; fun called from do_call
-		_rand = rand
+		_rand = Randoms()
 		for p in _starting_players.values() do
-			_players.push(_Player.initial(p, Pots.create_pot(5, rand)))
+			_add_player(p)
 		end
+
+	be add_player(player: Player tag) =>
+		match _state
+		| Start =>
+			_add_player(player)
+		end
+
+	fun ref _add_player(player: Player tag) =>
+		_players.push(_Player.initial(player, Pots.create_pot(5, _rand)))
 
 	be start() =>
 		match _state
