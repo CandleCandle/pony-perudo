@@ -11,7 +11,7 @@ actor Main
 		let game = Game.create(consume players)
 
 		try
-			let listener = TCPListener(env.root as AmbientAuth, recover NetcatPlayers(game) end, "localhost", "8989")
+			let listener = TCPListener(env.root as AmbientAuth, recover NetcatPlayers(game) end, "0.0.0.0", "8989")
 
 			let timers = Timers
 			let timer = Timer(Starter(game, listener), 10_000_000_000)
