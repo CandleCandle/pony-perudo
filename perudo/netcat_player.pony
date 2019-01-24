@@ -81,18 +81,23 @@ actor NetcatPlayer is Player
 			conn.write("parse error, try again\n")
 		end
 
+	// TODO be bid_made(...) -- when any player makes a bid.
+
 	be game_start(all_players: Array[String] val) =>
 		_conn.write("*** game start:\n")
 		for (i, n) in all_players.pairs() do
 			_conn.write("***     game start: "+i.string()+" -> "+n+".\n")
 		end
 
+
+	// TODO add current dice so that the player knows (a) what they had if they didn't bid, and (b) can start to calculate when the round starts.
 	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) =>
 		_conn.write("*** round start: starting "+start_index.string()+", me "+your_index.string()+" mode: "+round.string()+".\n")
 		for (i, n) in current_players.pairs() do
 			_conn.write("***     round start: "+i.string()+" -> "+n+".\n")
 		end
 
+	// TODO send all?? players dice so that players know why they los/won
 	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize, history: Array[Bid] val) =>
 		_conn.write("*** round end: loser "+losing_index.string()+", me "+your_index.string()+".\n")
 		for (i, n) in current_players.pairs() do
