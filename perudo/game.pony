@@ -41,7 +41,6 @@ actor Game
 		_players = Array[_Player](starting_players'.size())
 		_rand = Randoms()
 		for (n, p) in starting_players'.values() do
-			_starting_players.push(_Player.initial(n, p, Pot.create([])))
 			_add_player(n, p)
 		end
 
@@ -52,11 +51,13 @@ actor Game
 		end
 
 	fun ref _add_player(name: String val, player: Player tag) =>
+		_starting_players.push(_Player.initial(name, player, Pot.create([])))
 		_players.push(_Player.initial(name, player, Pots.create_pot(5, _rand)))
 
 	be start() =>
 		match _state
 		| Start =>
+			if _starting_players.size() == 0 then return end
 			_dispatch_game_start()
 			_state = Turn(0)
 			_dispatch_round_start(0)
@@ -161,7 +162,7 @@ actor Game
 				@printf[None]("\tplayer %d has %s\n".cstring(), i, p.pot.string().cstring())
 				count = count + p.pot.count_for_face(last_bid.face)
 				if not (last_bid.face is FaceOne) then
-					p.pot.count_for_face(FaceOne)
+					count = count + p.pot.count_for_face(FaceOne)
 				end
 			end
 			// work out which of the players won the call
