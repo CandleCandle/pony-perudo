@@ -14,11 +14,23 @@ actor Main
 actor BasicIncrementingBidder is Player
 	var _bid_count: USize = 20
 
-	be game_start(all_players: Array[String] val) => None
+	be game_start(all_players: Array[String] val) =>
+		@printf[None]("*** game start:\n".cstring())
+		for (i, n) in all_players.pairs() do
+			@printf[None]("***     game start: %d -> %s.\n".cstring(), i, n.cstring())
+		end
 
-	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) => None
+	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) =>
+		@printf[None]("*** round start: starting %d, me %d.\n".cstring(), start_index, your_index)
+		for (i, n) in current_players.pairs() do
+			@printf[None]("***     round start: %d -> %s.\n".cstring(), i, n.cstring())
+		end
 
-	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize) => None
+	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize, history: Array[Bid] val) =>
+		@printf[None]("*** round end: loser %d, me %d.\n".cstring(), losing_index, your_index)
+		for (i, n) in current_players.pairs() do
+			@printf[None]("***     round end: %d -> %s.\n".cstring(), i, n.cstring())
+		end
 
 	be game_end(all_players: Array[String] val, winning_index: USize, your_index: USize) =>
 		@printf[None]("*** game end: winner %d, me %d.\n".cstring(), winning_index, your_index)
@@ -82,7 +94,7 @@ trait Player
 	// Events:
 	be game_start(all_players: Array[String] val) => None
 	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) => None
-	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize) => None
+	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize, bid_history: Array[Bid] val) => None
 	be game_end(all_players: Array[String] val, winning_index: USize, your_index: USize) => None
 
 primitive FaceOne
@@ -232,7 +244,7 @@ actor Game
 		| Start =>
 			_dispatch_game_start()
 			_state = Turn(0)
-			_dispatch_round_start()
+			_dispatch_round_start(0)
 			try
 				let next_player = _players(0)?
 				@printf[None]("starting with %d\n".cstring(), U32(0))
@@ -279,25 +291,47 @@ actor Game
 		end
 		recover val consume history_copy end
 
-	fun _dispatch_game_start() => None
-	fun _dispatch_round_start() => None
-	fun _dispatch_round_end() => None
-	fun _dispatch_game_end() =>
+	fun ref _dispatch_game_start() =>
+		let names = _names_from(_starting_players)
+		for (idx, player) in _starting_players.pairs() do
+			player.player.game_start(names)
+		end
+
+	fun ref _dispatch_round_start(start_index: USize) =>
+		let names = _names_from(_players)
+		for (idx, player) in _players.pairs() do
+			player.player.round_start(names, start_index, idx, RoundNormal)
+		end
+
+	fun ref _dispatch_round_end(lost_index: USize) =>
+		let names = _names_from(_players)
+		let history = _copy_bid_history()
+		for (idx, player) in _players.pairs() do
+			player.player.round_end(names, lost_index, idx, history)
+		end
+
+	fun ref _dispatch_game_end() =>
 		try
 			let winner = _players(0)?
-			let names': Array[String] iso = recover iso Array[String](4) end
+			let names = _names_from(_starting_players)
 			var win_index: USize = 0
 			for (idx, player) in _starting_players.pairs() do
-				names'.push(player.name)
 				if player.player is winner.player then
 					win_index = idx
 				end
 			end
-			let names: Array[String] val = consume names'
 			for (idx, player) in _starting_players.pairs() do
 				player.player.game_end(names, win_index, idx)
 			end
 		end
+
+	fun ref _names_from(arr: Array[_Player]): Array[String] val =>
+		let size = arr.size()
+		let names': Array[String] iso = recover iso Array[String](size) end
+		for (idx, player) in arr.pairs() do
+			names'.push(player.name)
+		end
+		consume names'
 
 	be do_call(from: Player tag) =>
 		match _state
@@ -324,6 +358,7 @@ actor Game
 			end
 			@printf[None]("losing player was %d, there were %d of face %s\n".cstring(), lost_player, count, last_bid.face.string().cstring())
 
+			_dispatch_round_end(lost_player)
 			// rebuild _players
 			var next_index = lost_player
 			let players' = Array[_Player](_players.size())
@@ -349,12 +384,11 @@ actor Game
 				_state = End
 				_dispatch_game_end()
 			else
-				_dispatch_round_end()
 				_bid_history.clear()
 				try
 					let next_player = _players(next_index)?
 					_state = Turn(next_index)
-					_dispatch_round_start()
+					_dispatch_round_start(next_index)
 					next_player.player.do_bid(this, next_player.pot, recover val Array[Bid](0) end)
 				end
 			end
