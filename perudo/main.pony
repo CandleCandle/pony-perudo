@@ -6,13 +6,25 @@ use "random"
 actor Main
 
 	new create(env: Env) =>
-		let players: Array[Player tag] iso = recover iso [BasicIncrementingBidder; BasicIncrementingBidder; BasicIncrementingBidder] end
+		let players: Array[(String val, Player tag)] iso = recover iso [("a", BasicIncrementingBidder); ("b", BasicIncrementingBidder); ("c", BasicIncrementingBidder)] end
 
 		let game = Game.create(consume players)
 		game.start()
 
 actor BasicIncrementingBidder is Player
 	var _bid_count: USize = 20
+
+	be game_start(all_players: Array[String] val) => None
+
+	be round_start(current_players: Array[String] val, start_index: USize, your_index: USize, round: RoundType) => None
+
+	be round_end(current_players: Array[String] val, losing_index: USize, your_index: USize) => None
+
+	be game_end(all_players: Array[String] val, winning_index: USize, your_index: USize) =>
+		@printf[None]("*** game end: winner %d, me %d.\n".cstring(), winning_index, your_index)
+		for (i, n) in all_players.pairs() do
+			@printf[None]("***     game end: %d -> %s.\n".cstring(), i, n.cstring())
+		end
 
 	fun tag _last_bid_safe(history: Array[Bid] val): Bid =>
 		if history.size() == 0 then
@@ -182,40 +194,45 @@ class val Bid
 
 class _Player
 	let pot: Pot val
+	let name: String val
 	let player: Player tag
 
-	new initial(player': Player tag, pot': Pot) =>
+	new initial(name': String, player': Player tag, pot': Pot) =>
 		player = player'
 		pot = pot'
+		name = name'
 
 actor Game
 	var _state: GameState = Start
-	let _starting_players: Array[Player tag]
+	let _starting_players: Array[_Player]
 	var _players: Array[_Player]
 	var _bid_history: Array[Bid] = Array[Bid](10)
 	let _rand: Random
 
-	new create(starting_players': Array[Player tag] iso) =>
-		_starting_players = consume starting_players'
-		_players = Array[_Player](_starting_players.size())
+	new create(starting_players': Array[(String val, Player tag)] val) =>
+		_starting_players = Array[_Player](starting_players'.size())
+		_players = Array[_Player](starting_players'.size())
 		_rand = Randoms()
-		for p in _starting_players.values() do
-			_add_player(p)
+		for (n, p) in starting_players'.values() do
+			_starting_players.push(_Player.initial(n, p, Pot.create([])))
+			_add_player(n, p)
 		end
 
-	be add_player(player: Player tag) =>
+	be add_player(name: String val, player: Player tag) =>
 		match _state
 		| Start =>
-			_add_player(player)
+			_add_player(name, player)
 		end
 
-	fun ref _add_player(player: Player tag) =>
-		_players.push(_Player.initial(player, Pots.create_pot(5, _rand)))
+	fun ref _add_player(name: String val, player: Player tag) =>
+		_players.push(_Player.initial(name, player, Pots.create_pot(5, _rand)))
 
 	be start() =>
 		match _state
 		| Start =>
+			_dispatch_game_start()
 			_state = Turn(0)
+			_dispatch_round_start()
 			try
 				let next_player = _players(0)?
 				@printf[None]("starting with %d\n".cstring(), U32(0))
@@ -228,11 +245,7 @@ actor Game
 		match _state
 		| let state: Turn =>
 			try
-				let last_bid = if _bid_history.size() == 0 then
-						Bid(0, FaceOne) // this is the first bid of the round, set last_bid to min_bid
-					else
-						_bid_history(_bid_history.size()-1)?
-					end
+				let last_bid = _last_bid_safe()
 				// next player when (new bid > latest bid) OR this is the first bid
 				let index = state.next_player
 				let next_index = if (bid > last_bid) then
@@ -242,13 +255,9 @@ actor Game
 						index
 					end
 				_state = Turn(next_index)
-				let history_copy: Array[Bid] iso = recover iso Array[Bid](10) end
-				for b in _bid_history.values() do
-					history_copy.push(b)
-				end
 				let next_player = _players(next_index)?
 				@printf[None]("requesting bid from: %d\n".cstring(), next_index)
-				next_player.player.do_bid(this, next_player.pot, consume history_copy)
+				next_player.player.do_bid(this, next_player.pot, _copy_bid_history())
 			end
 		end
 
@@ -260,6 +269,33 @@ actor Game
 				_bid_history(_bid_history.size()-1)?
 			else
 				Bid(0, FaceOne)
+			end
+		end
+
+	fun _copy_bid_history(): Array[Bid] val =>
+		let history_copy: Array[Bid] iso = recover iso Array[Bid](10) end
+		for b in _bid_history.values() do
+			history_copy.push(b)
+		end
+		recover val consume history_copy end
+
+	fun _dispatch_game_start() => None
+	fun _dispatch_round_start() => None
+	fun _dispatch_round_end() => None
+	fun _dispatch_game_end() =>
+		try
+			let winner = _players(0)?
+			let names': Array[String] iso = recover iso Array[String](4) end
+			var win_index: USize = 0
+			for (idx, player) in _starting_players.pairs() do
+				names'.push(player.name)
+				if player.player is winner.player then
+					win_index = idx
+				end
+			end
+			let names: Array[String] val = consume names'
+			for (idx, player) in _starting_players.pairs() do
+				player.player.game_end(names, win_index, idx)
 			end
 		end
 
@@ -304,18 +340,21 @@ actor Game
 				match replacement_pot
 				| let pot': Pot =>
 					// players with zero dice do not get re-added here.
-					players'.push(_Player.initial(player.player, pot'))
+					players'.push(_Player.initial(player.name, player.player, pot'))
 				end
 			end
 			_players = players'
 
 			if _players.size() == 1 then
 				_state = End
+				_dispatch_game_end()
 			else
+				_dispatch_round_end()
 				_bid_history.clear()
 				try
 					let next_player = _players(next_index)?
 					_state = Turn(next_index)
+					_dispatch_round_start()
 					next_player.player.do_bid(this, next_player.pot, recover val Array[Bid](0) end)
 				end
 			end
