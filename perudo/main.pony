@@ -58,6 +58,21 @@ primitive Randoms
 		(let a: I64, let b: I64) = Time.now()
 		Rand.create(a.u64(), b.u64())
 
+primitive Pots
+	fun create_pot(count: U8, rand: Random): Pot val =>
+		let a: Array[Face] iso = recover iso Array[Face](count.usize()) end
+		var i: U8 = 0
+		while i < count do
+			a.push(Faces.roll(rand))
+			i = i + 1
+		end
+		Pot.create(recover val consume a end)
+
+	fun with_different_size(pot: Pot, change: I32, rand: Random): (None | Pot val) =>
+		let new_size: I32 = pot.dice.size().i32() + change
+		if new_size < 0 then return None end
+		create_pot(new_size.u8(), rand)
+
 class val Pot
 	let dice: Array[Face] val
 
@@ -72,6 +87,15 @@ class val Pot
 
 	new val create(dice': Array[Face] val) =>
 		dice = dice'
+
+	fun count_for_face(face: Face): U8 =>
+		var c: U8 = 0
+		for f in dice.values() do
+			if f is face then
+				c = c + 1
+			end
+		end
+		c
 
 class val Bid
 	let face: Face
@@ -120,17 +144,8 @@ actor Game
 		// TODO rebuild _players; fun called from do_call
 		_rand = rand
 		for p in _starting_players.values() do
-			_players.push(_Player.initial(p, _create_pot(5, rand)))
+			_players.push(_Player.initial(p, Pots.create_pot(5, rand)))
 		end
-
-	fun tag _create_pot(count: U8, rand: Random): Pot val =>
-		let a: Array[Face] iso = recover iso Array[Face](count.usize()) end
-		var i: U8 = 0
-		while i < count do
-			a.push(Faces.roll(rand))
-			i = i + 1
-		end
-		Pot.create(recover val consume a end)
 
 	be do_bid(from: Player tag, bid: Bid) =>
 		match _state
@@ -159,8 +174,66 @@ actor Game
 			end
 		end
 
+	fun _last_bid_safe(): Bid =>
+		if _bid_history.size() == 0 then
+			Bid(0, FaceOne)
+		else
+			try
+				_bid_history(_bid_history.size()-1)?
+			else
+				Bid(0, FaceOne)
+			end
+		end
+
 	be do_call(from: Player tag) =>
-		None
+		match _state
+		| let state: Turn =>
+			let last_bid = _last_bid_safe()
+			var count: U8 = 0
+			for p in _players.values() do
+				count = count + p.pot.count_for_face(last_bid.face)
+				if not (last_bid.face is FaceOne) then
+					p.pot.count_for_face(FaceOne)
+				end
+			end
+			// work out which of the players won the call
+			let lost_player = if count < last_bid.count then
+				// call was correct, previous bid was too high; previous player lost
+				((state.next_player + _players.size()) - 1) % _players.size()
+			else
+				state.next_player
+			end
+
+			// rebuild _players
+			var next_index = lost_player
+			let players' = Array[_Player](_players.size())
+			for (i, player) in _players.pairs() do
+				let replacement_pot: (Pot | None) = if i == lost_player then
+						Pots.with_different_size(player.pot, -1, _rand)
+					else
+						Pots.with_different_size(player.pot, 0, _rand)
+					end
+				if (i == lost_player) and (replacement_pot is None) then
+					// on player elimination, the next player starts rather than the one who lost a die.
+					next_index = (_players.size() + 1) % (_players.size()-1)
+				end
+				match replacement_pot
+				| let pot': Pot =>
+					// players with zero dice do not get re-added here.
+					players'.push(_Player.initial(player.player, pot'))
+				end
+			end
+			_players = players'
+
+			_bid_history.clear()
+			try
+				let next_player = _players(next_index)?
+				_state = Turn(next_index)
+				next_player.player.do_bid(this, next_player.pot, recover val Array[Bid](0) end)
+			end
+
+
+		end
 		// work out which of the players won the call
 		// remove a die from that player
 		// that player starts, unless they have 0 dice, in which case, the next player starts
